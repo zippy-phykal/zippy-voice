@@ -138,7 +138,7 @@ const server = http.createServer(async (req, res) => {
             model: 'clawdbot:main',
             messages: [{ role: 'user', content: transcript }],
             stream: false
-          }, token);
+          }, token, { 'x-clawdbot-session-key': 'agent:main:main' });
 
           if (aiRes.status === 401) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -193,7 +193,7 @@ const server = http.createServer(async (req, res) => {
             model: 'clawdbot:main',
             messages: [{ role: 'user', content: message }],
             stream: false
-          }, token);
+          }, token, { 'x-clawdbot-session-key': 'agent:main:main' });
           if (aiRes.status === 401) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Invalid auth token' }));
