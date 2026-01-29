@@ -50,6 +50,29 @@ function sendToTelegram(token, text) {
   }, token);
 }
 
+async function getRecentHistory(token, limit = 20) {
+  const res = await gatewayPost('/tools/invoke', {
+    tool: 'sessions_history',
+    args: { sessionKey: 'agent:main:main', limit, includeTools: false }
+  }, token);
+
+  if (!res.data?.ok || !res.data.result?.messages) return [];
+
+  const messages = [];
+  for (const msg of res.data.result.messages) {
+    const role = msg.role === 'assistant' ? 'assistant' : 'user';
+    let text = '';
+    if (typeof msg.content === 'string') {
+      text = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      const textPart = msg.content.find(p => p.type === 'text');
+      if (textPart) text = textPart.text;
+    }
+    if (text) messages.push({ role, content: text });
+  }
+  return messages;
+}
+
 function transcribeAudio(filePath) {
   return new Promise((resolve, reject) => {
     execFile('whisper-cli', [
@@ -133,10 +156,14 @@ const server = http.createServer(async (req, res) => {
           // Send user's message to Telegram
           await sendToTelegram(token, `🎤 ${transcript}`);
 
-          // Get AI response
+          // Get recent conversation history for context
+          let history = [];
+          try { history = await getRecentHistory(token); } catch (e) {}
+
+          // Get AI response with full context
           const aiRes = await gatewayPost('/v1/chat/completions', {
             model: 'clawdbot:main',
-            messages: [{ role: 'user', content: transcript }],
+            messages: [...history, { role: 'user', content: transcript }],
             stream: false
           }, token, { 'x-clawdbot-session-key': 'agent:main:main' });
 
@@ -189,9 +216,11 @@ const server = http.createServer(async (req, res) => {
             return;
           }
           await sendToTelegram(token, `🎤 ${message}`);
+          let history = [];
+          try { history = await getRecentHistory(token); } catch (e) {}
           const aiRes = await gatewayPost('/v1/chat/completions', {
             model: 'clawdbot:main',
-            messages: [{ role: 'user', content: message }],
+            messages: [...history, { role: 'user', content: message }],
             stream: false
           }, token, { 'x-clawdbot-session-key': 'agent:main:main' });
           if (aiRes.status === 401) {
