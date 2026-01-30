@@ -7,20 +7,23 @@ A PWA that gives you voice-to-voice communication with your Clawdbot AI assistan
 ## What's Working ✅
 - **Push-to-talk recording** — tap mic to start, tap to send
 - **Whisper transcription** — local whisper.cpp, no API keys, offline-capable
-- **Telegram session injection** — voice messages route into the main Telegram session via `sessions_send`
-- **Response polling** — polls `sessions_history` for new assistant replies (last 10 messages, skips MEDIA/NO_REPLY/HEARTBEAT noise)
-- **Browser TTS playback** — Web Speech API reads responses aloud on the phone
+- **Telegram session injection** — voice messages route into the main Telegram session via `sessions_send` (fire-and-forget, non-blocking)
+- **Response polling** — polls `sessions_history` every 2s for new assistant replies (last 10 messages, skips MEDIA/NO_REPLY/HEARTBEAT noise)
+- **Browser TTS playback** — Web Speech API reads responses aloud on the phone ✅ CONFIRMED WORKING
+- **Markdown stripping** — code blocks, bold, links etc. stripped for clean TTS
 - **Auto-summary** — long responses get summarized for voice, full text shown on screen
 - **PWA install** — add to home screen, wake lock, service worker
 - **Settings panel** — configure server URL and auth token
 - **Reset button** — clears service worker cache for updates
 - **Edge TTS on Telegram** — Clawdbot auto-converts text replies to voice notes in Telegram (edge-tts, en-US-GuyNeural)
+- **Auto-retry** — 3 attempts with 2s gaps if server unreachable
+- **Debug panel** — tap 🐛 icon to see real-time logs
+- **Progress status** — shows Uploading → Transcribing → Waiting → Still waiting...
+- **GitHub repo** — https://github.com/zippyclawdbot-lab/zippy-voice (public, johnminze as admin collaborator)
 
 ## What's NOT Working / Not Built Yet ❌
 - **Continuous listening** — currently push-to-talk only. "Zip out" stop phrase and 20-second silence detection are coded in index.html but rely on Web Speech API which is unreliable on Android Chrome (restarts on pause, drops transcript). Needs testing.
 - **"Enough" interrupt** — code exists to stop TTS playback when user says "enough" but untested in practice
-- **Voice response in Zippy Voice app** — TTS playback may not fire if the polling times out or response is slow. Needs more testing.
-- **No GitHub remote** — local git only, not pushed yet
 
 ## Architecture
 
