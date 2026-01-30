@@ -13,7 +13,8 @@
 - Format: 🍔 **BIG JOHN SAID:** "transcript here" 🍔
 - This is NOT optional — it's how John sees what he said in the chat thread
 - **Owner:** Clawdbot agent behavior (not app code) — agent must ALWAYS echo voice messages
-- **Status:** Agent keeps forgetting. This requirement exists to prevent that.
+- **Voice app:** The echo is STRIPPED from TTS playback — user doesn't hear their own words repeated back. Echo only appears in Telegram text.
+- **Status:** ✅ Working — echo in Telegram, stripped from voice
 
 ## R3: Auto-Retry on Connection Failure
 - If app can't reach server, retry up to 3 times with 2-second gaps
