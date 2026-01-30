@@ -118,27 +118,23 @@ async function sendAndWaitForReply(token, message) {
   // Get the last assistant message before we send
   const before = await getLastAssistantMessage(token);
 
-  // Inject message into the main Telegram session
-  console.log(`[send] Sending to gateway...`);
-  let sendRes;
-  try {
-    sendRes = await gatewayPost('/tools/invoke', {
-      tool: 'sessions_send',
-      args: {
-        sessionKey: 'agent:main:main',
-        message: `[🎤 Voice] ${message}`
-      }
-    }, token);
-    console.log(`[send] Gateway response: ok=${sendRes.data?.ok}, status=${sendRes.status}`);
-  } catch (err) {
+  // Fire-and-forget: inject message into the main Telegram session
+  // Don't await — sessions_send blocks until the AI finishes responding
+  console.log(`[send] Firing message to gateway (no-wait)...`);
+  gatewayPost('/tools/invoke', {
+    tool: 'sessions_send',
+    args: {
+      sessionKey: 'agent:main:main',
+      message: `[🎤 Voice] ${message}`
+    }
+  }, token).then(res => {
+    console.log(`[send] Gateway returned: ok=${res.data?.ok}, status=${res.status}`);
+  }).catch(err => {
     console.log(`[send] Gateway error: ${err.message}`);
-    return { reply: 'Failed to reach gateway', fullReply: 'Failed to reach gateway' };
-  }
+  });
 
-  if (!sendRes.data?.ok) {
-    console.log(`[send] Send failed:`, JSON.stringify(sendRes.data).substring(0, 200));
-    return { reply: 'Failed to send message', fullReply: 'Failed to send message' };
-  }
+  // Give the gateway a moment to accept the message before we start polling
+  await sleep(2000);
 
   // Poll for new assistant response (up to 2 minutes)
   console.log(`[poll] Before ts=${before.ts}, text="${(before.text || '').substring(0, 50)}"`);
