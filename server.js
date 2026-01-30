@@ -114,14 +114,18 @@ async function sendAndWaitForReply(token, message) {
   }
 
   // Poll for new assistant response (up to 2 minutes)
+  console.log(`[poll] Before ts=${before.ts}, text="${(before.text || '').substring(0, 50)}"`);
   for (let i = 0; i < 60; i++) {
     await sleep(2000);
     const after = await getLastAssistantMessage(token);
+    if (i % 5 === 0) console.log(`[poll] Check #${i}: ts=${after.ts}, text="${(after.text || '').substring(0, 50)}"`);
     if (after.ts > before.ts && after.text && after.text !== before.text) {
+      console.log(`[poll] Got reply after ${i * 2}s`);
       return { reply: after.text, fullReply: after.text };
     }
   }
 
+  console.log(`[poll] Timed out after 120s`);
   return { reply: 'No response received', fullReply: 'No response received' };
 }
 
@@ -176,7 +180,9 @@ const server = http.createServer(async (req, res) => {
           }
 
           // Send to main session and wait for reply
+          console.log(`[voice] Transcript: "${transcript}"`);
           const result = await sendAndWaitForReply(token, transcript);
+          console.log(`[voice] Reply: "${(result.reply || '').substring(0, 100)}..."`);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ transcript, ...result }));
