@@ -119,15 +119,24 @@ async function sendAndWaitForReply(token, message) {
   const before = await getLastAssistantMessage(token);
 
   // Inject message into the main Telegram session
-  const sendRes = await gatewayPost('/tools/invoke', {
-    tool: 'sessions_send',
-    args: {
-      sessionKey: 'agent:main:main',
-      message: `[🎤 Voice] ${message}`
-    }
-  }, token);
+  console.log(`[send] Sending to gateway...`);
+  let sendRes;
+  try {
+    sendRes = await gatewayPost('/tools/invoke', {
+      tool: 'sessions_send',
+      args: {
+        sessionKey: 'agent:main:main',
+        message: `[🎤 Voice] ${message}`
+      }
+    }, token);
+    console.log(`[send] Gateway response: ok=${sendRes.data?.ok}, status=${sendRes.status}`);
+  } catch (err) {
+    console.log(`[send] Gateway error: ${err.message}`);
+    return { reply: 'Failed to reach gateway', fullReply: 'Failed to reach gateway' };
+  }
 
   if (!sendRes.data?.ok) {
+    console.log(`[send] Send failed:`, JSON.stringify(sendRes.data).substring(0, 200));
     return { reply: 'Failed to send message', fullReply: 'Failed to send message' };
   }
 
