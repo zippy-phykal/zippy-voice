@@ -1,0 +1,27 @@
+{
+  "name": "zippy-voice",
+  "version": "1.0.0",
+  "description": "Voice-to-voice PWA for Clawdbot AI assistant via Telegram",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "clawdbot",
+    "voice",
+    "pwa",
+    "telegram",
+    "whisper",
+    "tts",
+    "ai-assistant"
+  ],
+  "author": "Zippy Voice Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zippyclawdbot-lab/zippy-voice.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

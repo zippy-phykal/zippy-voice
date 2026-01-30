@@ -71,17 +71,24 @@ Browser-native TTS is free, instant, and requires no API keys. The server strips
 
 ### Configure
 
-Edit the top of `server.js`:
-
-```js
-const GATEWAY = 'http://YOUR_CLAWDBOT_IP:18789';
-const WHISPER_MODEL = '/path/to/ggml-base.en.bin';
+```bash
+cp .env.example .env
 ```
+
+Edit `.env` with your values:
+
+```bash
+GATEWAY_URL=http://YOUR_CLAWDBOT_IP:18789
+WHISPER_MODEL=/path/to/ggml-base.en.bin
+PORT=8080
+```
+
+Or edit the defaults directly in `server.js`.
 
 ### Run
 
 ```bash
-node server.js
+npm start
 ```
 
 Or install as a systemd service for always-on:

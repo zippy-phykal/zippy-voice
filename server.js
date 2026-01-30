@@ -3,11 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 const DIR = __dirname;
-const GATEWAY = 'http://100.85.34.7:18789';
-const WHISPER_MODEL = '/home/jack/.local/share/whisper/ggml-base.en.bin';
-const UPLOAD_DIR = '/tmp/zippy-voice';
+const GATEWAY = process.env.GATEWAY_URL || 'http://100.85.34.7:18789';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || '/home/jack/.local/share/whisper/ggml-base.en.bin';
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/tmp/zippy-voice';
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
