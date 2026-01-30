@@ -44,6 +44,24 @@ function gatewayPost(urlPath, body, token) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+function cleanForVoice(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, '') // remove code blocks
+    .replace(/`([^`]+)`/g, '$1')    // remove inline code backticks
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold → plain
+    .replace(/\*([^*]+)\*/g, '$1')     // italic → plain
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/#{1,6}\s*/g, '')       // remove headers
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → text only
+    .replace(/^[-*•]\s+/gm, '')      // remove bullet points
+    .replace(/^\d+\.\s+/gm, '')      // remove numbered lists
+    .replace(/\n{2,}/g, '. ')        // double newlines → pause
+    .replace(/\n/g, ' ')             // single newlines → space
+    .replace(/\s{2,}/g, ' ')         // collapse whitespace
+    .trim();
+}
+
 function transcribeAudio(filePath) {
   return new Promise((resolve, reject) => {
     execFile('whisper-cli', [
@@ -121,7 +139,8 @@ async function sendAndWaitForReply(token, message) {
     if (i % 5 === 0) console.log(`[poll] Check #${i}: ts=${after.ts}, text="${(after.text || '').substring(0, 50)}"`);
     if (after.ts > before.ts && after.text && after.text !== before.text) {
       console.log(`[poll] Got reply after ${i * 2}s`);
-      return { reply: after.text, fullReply: after.text };
+      const voiceText = cleanForVoice(after.text);
+      return { reply: voiceText, fullReply: after.text };
     }
   }
 
