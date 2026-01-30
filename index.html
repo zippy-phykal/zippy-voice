@@ -212,39 +212,49 @@ async function sendAudio() {
   setState('sending');
   transcriptEl.textContent = '';
 
-  try {
-    const formData = new FormData();
-    formData.append('audio', blob, 'voice.webm');
-    formData.append('token', config.token);
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob, 'voice.webm');
+      formData.append('token', config.token);
 
-    const baseUrl = config.url || window.location.origin;
-    const resp = await fetch(`${baseUrl}/api/voice-send`, {
-      method: 'POST',
-      body: formData
-    });
+      if (attempt > 1) setState('sending', `Retrying... (${attempt}/${maxRetries})`);
 
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+      const baseUrl = config.url || window.location.origin;
+      const resp = await fetch(`${baseUrl}/api/voice-send`, {
+        method: 'POST',
+        body: formData
+      });
 
-    if (data.error) {
-      setState('idle', data.error);
-      return;
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+
+      if (data.error) {
+        setState('idle', data.error);
+        return;
+      }
+
+      // Show transcript
+      transcriptEl.textContent = data.transcript || '';
+
+      // Play voice response
+      const voiceReply = data.reply || 'No response';
+      const fullReply = data.fullReply || voiceReply;
+      setState('playing');
+      transcriptEl.textContent = fullReply.substring(0, 300) + (fullReply.length > 300 ? '...' : '');
+      await speak(voiceReply);
+      setState('idle');
+      return; // success, done
+    } catch (err) {
+      console.error(`Attempt ${attempt} failed:`, err);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
+      } else {
+        await speak('Could not reach Zippy after multiple tries.');
+        setState('idle', 'Connection failed — check WiFi/Tailscale');
+      }
     }
-
-    // Show transcript
-    transcriptEl.textContent = data.transcript || '';
-
-    // Play voice response
-    const voiceReply = data.reply || 'No response';
-    const fullReply = data.fullReply || voiceReply;
-    setState('playing');
-    transcriptEl.textContent = fullReply.substring(0, 300) + (fullReply.length > 300 ? '...' : '');
-    await speak(voiceReply);
-    setState('idle');
-  } catch (err) {
-    console.error(err);
-    await speak('Could not reach Zippy.');
-    setState('idle');
   }
 }
 
