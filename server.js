@@ -46,6 +46,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function cleanForVoice(text) {
   return text
+    .replace(/🍔\s*\*{0,2}BIG JOHN SAID:\*{0,2}\s*"[^"]*"\s*🍔/gi, '') // strip echo block
     .replace(/```[\s\S]*?```/g, '') // remove code blocks
     .replace(/`([^`]+)`/g, '$1')    // remove inline code backticks
     .replace(/\*\*([^*]+)\*\*/g, '$1') // bold → plain
