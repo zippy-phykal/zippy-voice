@@ -142,7 +142,7 @@ async function sendAndWaitForReply(token, message) {
       action: 'send',
       channel: 'telegram',
       target: TELEGRAM_CHAT_ID,
-      message: `🎤 *Voice:* ${message}`
+      message: `🎙️ **YOU SAID:** "${message}"`
     }
   }, token).then(res => {
     console.log(`[telegram] Visible message sent: ok=${res.data?.ok}`);
