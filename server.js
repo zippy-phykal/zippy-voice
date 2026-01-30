@@ -8,6 +8,7 @@ const DIR = __dirname;
 const GATEWAY = process.env.GATEWAY_URL || 'http://100.85.34.7:18789';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || '/home/jack/.local/share/whisper/ggml-base.en.bin';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/tmp/zippy-voice';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '8398867491';
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -132,6 +133,21 @@ async function sendAndWaitForReply(token, message) {
     console.log(`[send] Gateway returned: ok=${res.data?.ok}, status=${res.status}`);
   }).catch(err => {
     console.log(`[send] Gateway error: ${err.message}`);
+  });
+
+  // Also send a visible message to Telegram so the user sees their transcript in the chat
+  gatewayPost('/tools/invoke', {
+    tool: 'message',
+    args: {
+      action: 'send',
+      channel: 'telegram',
+      target: TELEGRAM_CHAT_ID,
+      message: `🎤 *Voice:* ${message}`
+    }
+  }, token).then(res => {
+    console.log(`[telegram] Visible message sent: ok=${res.data?.ok}`);
+  }).catch(err => {
+    console.log(`[telegram] Visible message error: ${err.message}`);
   });
 
   // Give the gateway a moment to accept the message before we start polling
