@@ -74,8 +74,8 @@ async function getLastAssistantMessage(token) {
     args: { sessionKey: 'agent:main:main', limit: 10, includeTools: false }
   }, token);
 
-  if (res.data?.ok && res.data.result?.messages) {
-    const msgs = res.data.result.messages;
+  const msgs = res.data?.result?.details?.messages || res.data?.result?.messages;
+  if (res.data?.ok && msgs) {
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'assistant') {
         let text = '';
