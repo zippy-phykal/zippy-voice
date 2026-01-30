@@ -50,6 +50,19 @@ body {
   max-width: 85%; min-height: 20px; word-wrap: break-word;
 }
 #timer { margin-top: 8px; font-size: 24px; color: #dc2626; font-variant-numeric: tabular-nums; min-height: 30px; }
+/* Debug panel */
+#debug {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  max-height: 30vh; overflow-y: auto; background: rgba(0,0,0,0.85);
+  font-family: monospace; font-size: 11px; color: #0f0; padding: 8px 12px;
+  display: none; z-index: 50;
+}
+#debug.open { display: block; }
+#debug-toggle {
+  position: fixed; bottom: 8px; right: 8px; width: 36px; height: 36px;
+  background: rgba(255,255,255,0.1); border: none; border-radius: 50%;
+  color: #666; font-size: 14px; cursor: pointer; z-index: 100;
+}
 /* Settings */
 #settings-modal {
   display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8);
@@ -84,6 +97,9 @@ body {
 <div id="timer"></div>
 <div id="transcript"></div>
 
+<div id="debug"></div>
+<button id="debug-toggle">🐛</button>
+
 <div id="settings-modal">
   <div id="settings-panel">
     <h2>⚡ Settings</h2>
@@ -107,6 +123,19 @@ function loadConfig() {
 }
 function saveConfig(cfg) { localStorage.setItem('zv_config', JSON.stringify(cfg)); }
 let config = loadConfig();
+
+// ─── Debug ─────────────────────────────────────────────────────
+const debugEl = document.getElementById('debug');
+const debugToggle = document.getElementById('debug-toggle');
+debugToggle.addEventListener('click', () => debugEl.classList.toggle('open'));
+function dbg(msg) {
+  const ts = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.textContent = `[${ts}] ${msg}`;
+  debugEl.appendChild(line);
+  debugEl.scrollTop = debugEl.scrollHeight;
+  console.log(`[dbg] ${msg}`);
+}
 
 // ─── DOM ───────────────────────────────────────────────────────
 const micBtn = document.getElementById('mic-btn');
@@ -211,6 +240,7 @@ async function sendAudio() {
 
   setState('sending');
   transcriptEl.textContent = '';
+  dbg(`Audio blob: ${blob.size} bytes`);
 
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -219,34 +249,60 @@ async function sendAudio() {
       formData.append('audio', blob, 'voice.webm');
       formData.append('token', config.token);
 
-      if (attempt > 1) setState('sending', `Retrying... (${attempt}/${maxRetries})`);
+      if (attempt > 1) {
+        setState('sending', `Retrying... (${attempt}/${maxRetries})`);
+        dbg(`Retry attempt ${attempt}/${maxRetries}`);
+      }
 
       const baseUrl = config.url || window.location.origin;
+      dbg(`POST ${baseUrl}/api/voice-send`);
+      setState('sending', 'Uploading audio...');
+
+      // Update status while waiting (server transcribes + polls)
+      const statusUpdates = [
+        { delay: 3000, msg: 'Transcribing...' },
+        { delay: 8000, msg: 'Waiting for Zippy...' },
+        { delay: 20000, msg: 'Still waiting...' },
+        { delay: 45000, msg: 'Zippy is thinking hard...' },
+        { delay: 90000, msg: 'Almost there...' }
+      ];
+      const statusTimers = statusUpdates.map(u =>
+        setTimeout(() => { if (state === 'sending') setState('sending', u.msg); }, u.delay)
+      );
+
       const resp = await fetch(`${baseUrl}/api/voice-send`, {
         method: 'POST',
         body: formData
       });
 
+      statusTimers.forEach(t => clearTimeout(t));
+      dbg(`Response status: ${resp.status}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
+      dbg(`Response keys: ${Object.keys(data).join(', ')}`);
 
       if (data.error) {
+        dbg(`Error from server: ${data.error}`);
         setState('idle', data.error);
         return;
       }
 
       // Show transcript
+      dbg(`Transcript: "${data.transcript || '(empty)'}"`);
       transcriptEl.textContent = data.transcript || '';
 
       // Play voice response
       const voiceReply = data.reply || 'No response';
       const fullReply = data.fullReply || voiceReply;
+      dbg(`Reply (${voiceReply.length} chars): "${voiceReply.substring(0, 80)}..."`);
       setState('playing');
       transcriptEl.textContent = fullReply.substring(0, 300) + (fullReply.length > 300 ? '...' : '');
       await speak(voiceReply);
       setState('idle');
       return; // success, done
     } catch (err) {
+      statusTimers.forEach(t => clearTimeout(t));
+      dbg(`Attempt ${attempt} FAILED: ${err.message}`);
       console.error(`Attempt ${attempt} failed:`, err);
       if (attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
