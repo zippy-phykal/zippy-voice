@@ -106,7 +106,7 @@ async function getLastAssistantMessage(token) {
         }
         // Skip empty, NO_REPLY, HEARTBEAT, MEDIA-only, or echoed voice transcripts
         if (!text || text === 'NO_REPLY' || text === 'HEARTBEAT_OK' || /^MEDIA:/.test(text.trim())) continue;
-        if (/^🎙️\s*\*{0,2}YOU SAID/.test(text) || /^🎤\s*\*?Voice:?\*?/.test(text)) continue;
+        if (/^🎙️\s*\*{0,2}YOU SAID/.test(text) || /^🎤\s*\*?Voice:?\*?/.test(text) || /^⚡\s/.test(text)) continue;
         if (text === 'ANNOUNCE_SKIP') continue;
         // Strip MEDIA lines from response
         text = text.replace(/^MEDIA:.*$/gm, '').trim();
@@ -164,6 +164,22 @@ async function sendAndWaitForReply(token, message) {
     if (after.ts > before.ts && after.text && after.text !== before.text) {
       console.log(`[poll] Got reply after ${i * 2}s`);
       const voiceText = cleanForVoice(after.text);
+
+      // Send the AI reply visibly to Telegram so it appears in the chat thread
+      gatewayPost('/tools/invoke', {
+        tool: 'message',
+        args: {
+          action: 'send',
+          channel: 'telegram',
+          target: TELEGRAM_CHAT_ID,
+          message: `⚡ ${after.text}`
+        }
+      }, token).then(res => {
+        console.log(`[telegram] AI reply sent: ok=${res.data?.ok}`);
+      }).catch(err => {
+        console.log(`[telegram] AI reply error: ${err.message}`);
+      });
+
       return { reply: voiceText, fullReply: after.text };
     }
   }
