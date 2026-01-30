@@ -9,7 +9,6 @@ const GATEWAY = 'http://100.85.34.7:18789';
 const WHISPER_MODEL = '/home/jack/.local/share/whisper/ggml-base.en.bin';
 const UPLOAD_DIR = '/tmp/zippy-voice';
 
-// Ensure upload dir exists
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const MIME = {
@@ -43,44 +42,13 @@ function gatewayPost(urlPath, body, token) {
   });
 }
 
-function sendToTelegram(token, text) {
-  return gatewayPost('/tools/invoke', {
-    tool: 'message',
-    args: { action: 'send', channel: 'telegram', target: '8398867491', message: text }
-  }, token);
-}
-
-async function getRecentHistory(token, limit = 20) {
-  const res = await gatewayPost('/tools/invoke', {
-    tool: 'sessions_history',
-    args: { sessionKey: 'agent:main:main', limit, includeTools: false }
-  }, token);
-
-  if (!res.data?.ok || !res.data.result?.messages) return [];
-
-  const messages = [];
-  for (const msg of res.data.result.messages) {
-    const role = msg.role === 'assistant' ? 'assistant' : 'user';
-    let text = '';
-    if (typeof msg.content === 'string') {
-      text = msg.content;
-    } else if (Array.isArray(msg.content)) {
-      const textPart = msg.content.find(p => p.type === 'text');
-      if (textPart) text = textPart.text;
-    }
-    if (text) messages.push({ role, content: text });
-  }
-  return messages;
-}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function transcribeAudio(filePath) {
   return new Promise((resolve, reject) => {
     execFile('whisper-cli', [
-      '-m', WHISPER_MODEL,
-      '--no-timestamps', '-np',
-      '-f', filePath
-    ], { timeout: 30000 }, (err, stdout, stderr) => {
-      // Clean up temp file
+      '-m', WHISPER_MODEL, '--no-timestamps', '-np', '-f', filePath
+    ], { timeout: 30000 }, (err, stdout) => {
       fs.unlink(filePath, () => {});
       if (err) return reject(err);
       resolve(stdout.trim());
@@ -100,14 +68,69 @@ function convertToWav(inputPath) {
   });
 }
 
+async function getLastAssistantMessage(token) {
+  const res = await gatewayPost('/tools/invoke', {
+    tool: 'sessions_history',
+    args: { sessionKey: 'agent:main:main', limit: 10, includeTools: false }
+  }, token);
+
+  if (res.data?.ok && res.data.result?.messages) {
+    const msgs = res.data.result.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant') {
+        let text = '';
+        if (typeof msgs[i].content === 'string') text = msgs[i].content;
+        else if (Array.isArray(msgs[i].content)) {
+          const tp = msgs[i].content.find(p => p.type === 'text');
+          if (tp) text = tp.text;
+        }
+        // Skip empty, NO_REPLY, HEARTBEAT, or MEDIA-only responses
+        if (!text || text === 'NO_REPLY' || text === 'HEARTBEAT_OK' || /^MEDIA:/.test(text.trim())) continue;
+        // Strip MEDIA lines from response
+        text = text.replace(/^MEDIA:.*$/gm, '').trim();
+        if (!text) continue;
+        return { text, ts: msgs[i].timestamp || 0 };
+      }
+    }
+  }
+  return { text: '', ts: 0 };
+}
+
+async function sendAndWaitForReply(token, message) {
+  // Get the last assistant message before we send
+  const before = await getLastAssistantMessage(token);
+
+  // Inject message into the main Telegram session
+  const sendRes = await gatewayPost('/tools/invoke', {
+    tool: 'sessions_send',
+    args: {
+      sessionKey: 'agent:main:main',
+      message: `[🎤 Voice] ${message}`
+    }
+  }, token);
+
+  if (!sendRes.data?.ok) {
+    return { reply: 'Failed to send message', fullReply: 'Failed to send message' };
+  }
+
+  // Poll for new assistant response (up to 2 minutes)
+  for (let i = 0; i < 60; i++) {
+    await sleep(2000);
+    const after = await getLastAssistantMessage(token);
+    if (after.ts > before.ts && after.text && after.text !== before.text) {
+      return { reply: after.text, fullReply: after.text };
+    }
+  }
+
+  return { reply: 'No response received', fullReply: 'No response received' };
+}
+
 const server = http.createServer(async (req, res) => {
-  // Audio upload + transcribe + send endpoint
+  // Voice send endpoint
   if (req.url === '/api/voice-send' && req.method === 'POST') {
-    // Multipart: audio file + token
     const contentType = req.headers['content-type'] || '';
 
     if (contentType.includes('multipart/form-data')) {
-      // Parse multipart
       const boundary = contentType.split('boundary=')[1];
       if (!boundary) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -141,62 +164,22 @@ const server = http.createServer(async (req, res) => {
             wavFile = await convertToWav(tempFile);
             fs.unlink(tempFile, () => {});
           } catch (e) {
-            wavFile = tempFile; // Try raw if ffmpeg fails
+            wavFile = tempFile;
           }
 
-          // Transcribe with Whisper
+          // Transcribe
           const transcript = await transcribeAudio(wavFile);
-
           if (!transcript) {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'No speech detected', transcript: '' }));
             return;
           }
 
-          // Send user's message to Telegram
-          await sendToTelegram(token, `🎤 ${transcript}`);
-
-          // Get recent conversation history for context
-          let history = [];
-          try { history = await getRecentHistory(token); } catch (e) {}
-
-          // Get AI response with full context
-          const aiRes = await gatewayPost('/v1/chat/completions', {
-            model: 'clawdbot:main',
-            messages: [...history, { role: 'user', content: transcript }],
-            stream: false
-          }, token, { 'x-clawdbot-session-key': 'agent:main:main' });
-
-          if (aiRes.status === 401) {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Invalid auth token' }));
-            return;
-          }
-
-          const reply = aiRes.data?.choices?.[0]?.message?.content || 'No response';
-
-          // Auto-summarize long responses for voice
-          let voiceReply = reply;
-          if (reply.length > 500) {
-            try {
-              const summaryRes = await gatewayPost('/v1/chat/completions', {
-                model: 'clawdbot:main',
-                messages: [{
-                  role: 'user',
-                  content: `Summarize this in 1-2 short spoken sentences for someone driving. No markdown, no lists, just natural speech:\n\n${reply}`
-                }],
-                stream: false
-              }, token);
-              const summary = summaryRes.data?.choices?.[0]?.message?.content;
-              if (summary && summary.length < reply.length) voiceReply = summary;
-            } catch (e) {}
-          }
-
-          // Send response to Telegram
-          await sendToTelegram(token, `⚡ ${reply}`);
+          // Send to main session and wait for reply
+          const result = await sendAndWaitForReply(token, transcript);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ transcript, reply: voiceReply, fullReply: reply }));
+          res.end(JSON.stringify({ transcript, ...result }));
         } catch (err) {
           console.error('Voice send error:', err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -204,7 +187,7 @@ const server = http.createServer(async (req, res) => {
         }
       });
     } else {
-      // JSON body (legacy text-based)
+      // JSON body (text-based)
       let body = '';
       req.on('data', c => body += c);
       req.on('end', async () => {
@@ -215,23 +198,9 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: 'Missing message or token' }));
             return;
           }
-          await sendToTelegram(token, `🎤 ${message}`);
-          let history = [];
-          try { history = await getRecentHistory(token); } catch (e) {}
-          const aiRes = await gatewayPost('/v1/chat/completions', {
-            model: 'clawdbot:main',
-            messages: [...history, { role: 'user', content: message }],
-            stream: false
-          }, token, { 'x-clawdbot-session-key': 'agent:main:main' });
-          if (aiRes.status === 401) {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Invalid auth token' }));
-            return;
-          }
-          const reply = aiRes.data?.choices?.[0]?.message?.content || 'No response';
-          await sendToTelegram(token, `⚡ ${reply}`);
+          const result = await sendAndWaitForReply(token, message);
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ reply, fullReply: reply }));
+          res.end(JSON.stringify(result));
         } catch (err) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
@@ -258,23 +227,17 @@ const server = http.createServer(async (req, res) => {
 // Simple multipart parser
 function parseMultipart(buffer, boundary) {
   const parts = [];
-  const boundaryBuf = Buffer.from(`--${boundary}`);
   const str = buffer.toString('binary');
   const segments = str.split(`--${boundary}`);
-
   for (let i = 1; i < segments.length; i++) {
     const segment = segments[i];
-    if (segment.startsWith('--')) break; // End boundary
-
+    if (segment.startsWith('--')) break;
     const headerEnd = segment.indexOf('\r\n\r\n');
     if (headerEnd === -1) continue;
-
     const headerStr = segment.substring(0, headerEnd);
     const bodyStr = segment.substring(headerEnd + 4).replace(/\r\n$/, '');
-
     const nameMatch = headerStr.match(/name="([^"]+)"/);
     const filenameMatch = headerStr.match(/filename="([^"]+)"/);
-
     if (nameMatch) {
       parts.push({
         name: nameMatch[1],

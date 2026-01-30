@@ -24,6 +24,19 @@ A lightweight PWA that lets you talk to Clawdbot by voice — tap to record, it 
 - **TTS:** Web Speech API (browser-native)
 - **AI:** Clawdbot gateway (OpenAI-compatible API)
 
+## Architecture Decisions
+
+### Conversation Context: Last 20 Messages
+
+The voice endpoint pulls the **last 20 messages** from your Clawdbot session to give the AI conversational context. This is intentional:
+
+- **Voice is real-time** — latency matters. More context = more tokens = slower responses.
+- **Shared session** — the voice app uses your main Clawdbot session, so those 20 messages include Telegram, voice, and any other channel. It's a good window.
+- **Cost** — every voice interaction sends the full context. Deeper history multiplies token cost fast.
+- **Relevance decay** — for hands-free use (driving, cooking), you almost never need something from 30+ messages ago.
+
+The limit is configurable in `server.js` (`getRecentHistory(token, 20)`). Bump it if your use case needs more, but 20 is the sweet spot for responsive voice interaction.
+
 ## Setup
 
 ### Prerequisites
