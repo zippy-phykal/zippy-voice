@@ -104,8 +104,10 @@ async function getLastAssistantMessage(token) {
           const tp = msgs[i].content.find(p => p.type === 'text');
           if (tp) text = tp.text;
         }
-        // Skip empty, NO_REPLY, HEARTBEAT, or MEDIA-only responses
+        // Skip empty, NO_REPLY, HEARTBEAT, MEDIA-only, or echoed voice transcripts
         if (!text || text === 'NO_REPLY' || text === 'HEARTBEAT_OK' || /^MEDIA:/.test(text.trim())) continue;
+        if (/^🎙️\s*\*{0,2}YOU SAID/.test(text) || /^🎤\s*\*?Voice:?\*?/.test(text)) continue;
+        if (text === 'ANNOUNCE_SKIP') continue;
         // Strip MEDIA lines from response
         text = text.replace(/^MEDIA:.*$/gm, '').trim();
         if (!text) continue;
