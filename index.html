@@ -23,6 +23,16 @@ body {
 }
 #reset-btn { left: 16px; }
 #settings-btn { right: 16px; }
+#new-session-btn {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  background: #7c3aed; border: none; border-radius: 20px;
+  color: #fff; font-size: 14px; font-weight: 600; padding: 8px 20px;
+  cursor: pointer; z-index: 100; letter-spacing: 0.3px;
+  transition: background 0.2s, transform 0.1s;
+}
+#new-session-btn:active { transform: translateX(-50%) scale(0.95); }
+#new-session-btn:hover { background: #6d28d9; }
+#new-session-btn.sending { background: #555; pointer-events: none; }
 #mic-btn {
   width: 180px; height: 180px; border-radius: 50%; border: none; cursor: pointer;
   transition: background 0.3s, box-shadow 0.3s, transform 0.1s;
@@ -48,8 +58,11 @@ body {
 #transcript {
   margin-top: 16px; font-size: 14px; color: #666; text-align: center;
   max-width: 85%; min-height: 20px; word-wrap: break-word;
+  max-height: 30vh; overflow-y: auto;
 }
 #timer { margin-top: 8px; font-size: 24px; color: #dc2626; font-variant-numeric: tabular-nums; min-height: 30px; }
+/* Audio element hidden */
+#tts-audio { display: none; }
 /* Debug panel */
 #debug {
   position: fixed; bottom: 0; left: 0; right: 0;
@@ -63,7 +76,7 @@ body {
   background: rgba(255,255,255,0.1); border: none; border-radius: 50%;
   color: #666; font-size: 14px; cursor: pointer; z-index: 100;
 }
-/* Settings */
+/* Settings modal */
 #settings-modal {
   display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8);
   z-index: 200; align-items: center; justify-content: center;
@@ -71,14 +84,15 @@ body {
 #settings-modal.open { display: flex; }
 #settings-panel {
   background: #16213e; border-radius: 16px; padding: 28px;
-  width: 90%; max-width: 400px;
+  width: 90%; max-width: 400px; max-height: 80vh; overflow-y: auto;
 }
 #settings-panel h2 { color: #fff; margin-bottom: 20px; }
 #settings-panel label { display: block; color: #aaa; font-size: 13px; margin-top: 14px; margin-bottom: 4px; }
-#settings-panel input {
+#settings-panel input, #settings-panel select {
   width: 100%; padding: 10px; border: 1px solid #333;
   border-radius: 8px; background: #0f3460; color: #fff; font-size: 15px;
 }
+.voice-preview { display: inline-block; margin-left: 8px; font-size: 12px; color: #7c3aed; cursor: pointer; }
 .btn-row { margin-top: 24px; display: flex; gap: 12px; }
 .btn-row button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; }
 #save-btn { background: #2563eb; color: #fff; }
@@ -87,6 +101,7 @@ body {
 </head>
 <body>
 <button id="reset-btn" class="top-btn">🔄</button>
+<button id="new-session-btn">✨ New Session</button>
 <button id="settings-btn" class="top-btn">⚙️</button>
 
 <button id="mic-btn" class="idle">
@@ -96,6 +111,8 @@ body {
 <div id="status">Tap to talk</div>
 <div id="timer"></div>
 <div id="transcript"></div>
+
+<audio id="tts-audio" preload="none"></audio>
 
 <div id="debug"></div>
 <button id="debug-toggle">🐛</button>
@@ -107,6 +124,19 @@ body {
     <input id="cfg-url" type="url" placeholder="Leave blank for default">
     <label for="cfg-token">Auth Token</label>
     <input id="cfg-token" type="password" placeholder="Gateway token">
+    <label for="cfg-voice">Voice</label>
+    <select id="cfg-voice">
+      <option value="en-US-AnaNeural">Ana (Young, Cheerful) ✨</option>
+      <option value="en-US-GuyNeural">Guy (Male, Passionate)</option>
+      <option value="en-US-JennyNeural">Jenny (Female, Friendly)</option>
+      <option value="en-US-AriaNeural">Aria (Female, Confident)</option>
+      <option value="en-US-BrianNeural">Brian (Male, Casual)</option>
+      <option value="en-US-EmmaNeural">Emma (Female, Clear)</option>
+      <option value="en-US-ChristopherNeural">Christopher (Male, Authority)</option>
+      <option value="en-US-AvaNeural">Ava (Female, Expressive)</option>
+      <option value="en-US-AndrewNeural">Andrew (Male, Warm)</option>
+      <option value="en-US-RogerNeural">Roger (Male, Lively)</option>
+    </select>
     <div class="btn-row">
       <button id="cancel-btn">Cancel</button>
       <button id="save-btn">Save</button>
@@ -116,7 +146,7 @@ body {
 
 <script>
 // ─── Config ────────────────────────────────────────────────────
-const DEFAULTS = { url: '', token: '' };
+const DEFAULTS = { url: '', token: '', voice: 'en-US-AnaNeural' };
 function loadConfig() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('zv_config')) }; }
   catch { return { ...DEFAULTS }; }
@@ -142,11 +172,13 @@ const micBtn = document.getElementById('mic-btn');
 const statusEl = document.getElementById('status');
 const timerEl = document.getElementById('timer');
 const transcriptEl = document.getElementById('transcript');
+const audioEl = document.getElementById('tts-audio');
 
 // ─── Settings ──────────────────────────────────────────────────
 document.getElementById('settings-btn').addEventListener('click', () => {
   document.getElementById('cfg-url').value = config.url;
   document.getElementById('cfg-token').value = config.token;
+  document.getElementById('cfg-voice').value = config.voice || DEFAULTS.voice;
   document.getElementById('settings-modal').classList.add('open');
 });
 document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -155,8 +187,10 @@ document.getElementById('cancel-btn').addEventListener('click', () => {
 document.getElementById('save-btn').addEventListener('click', () => {
   config.url = document.getElementById('cfg-url').value.replace(/\/+$/, '') || '';
   config.token = document.getElementById('cfg-token').value;
+  config.voice = document.getElementById('cfg-voice').value;
   saveConfig(config);
   document.getElementById('settings-modal').classList.remove('open');
+  dbg(`Config saved. Voice: ${config.voice}`);
 });
 
 // ─── State ─────────────────────────────────────────────────────
@@ -166,8 +200,6 @@ let audioChunks = [];
 let recordingStart = 0;
 let timerInterval = null;
 let wakeLock = null;
-let isSpeaking = false;
-let speakResolve = null;
 
 function setState(newState, msg) {
   state = newState;
@@ -176,7 +208,7 @@ function setState(newState, msg) {
     idle: 'Tap to talk',
     recording: 'Recording — tap to send',
     sending: 'Sending to Zippy...',
-    playing: 'Tap anywhere to stop'
+    playing: 'Playing — tap to stop'
   }[newState];
   if (newState !== 'recording') {
     timerEl.textContent = '';
@@ -198,15 +230,11 @@ async function startRecording() {
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data);
     };
-    mediaRecorder.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-    };
-    mediaRecorder.start(100); // Collect in 100ms chunks
+    mediaRecorder.onstop = () => stream.getTracks().forEach(t => t.stop());
+    mediaRecorder.start(100);
     recordingStart = Date.now();
     setState('recording');
     requestWakeLock();
-
-    // Timer display
     timerInterval = setInterval(() => {
       const secs = Math.floor((Date.now() - recordingStart) / 1000);
       timerEl.textContent = `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
@@ -219,7 +247,6 @@ async function startRecording() {
 async function stopAndSend() {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
   clearInterval(timerInterval);
-
   return new Promise((resolve) => {
     mediaRecorder.onstop = () => {
       mediaRecorder.stream.getTracks().forEach(t => t.stop());
@@ -232,118 +259,97 @@ async function stopAndSend() {
 async function sendAudio() {
   const blob = new Blob(audioChunks, { type: 'audio/webm' });
   audioChunks = [];
-
-  if (blob.size < 1000) {
-    setState('idle', 'Too short — tap and talk');
-    return;
-  }
+  if (blob.size < 1000) { setState('idle', 'Too short — tap and talk'); return; }
 
   setState('sending');
   transcriptEl.textContent = '';
-  dbg(`Audio blob: ${blob.size} bytes`);
+  dbg(`Audio: ${blob.size} bytes`);
 
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const formData = new FormData();
-      formData.append('audio', blob, 'voice.webm');
-      formData.append('token', config.token);
+  // Status updates while waiting
+  const statusUpdates = [
+    { delay: 2000, msg: 'Transcribing...' },
+    { delay: 6000, msg: 'Waiting for Zippy...' },
+    { delay: 15000, msg: 'Still thinking...' },
+    { delay: 30000, msg: 'Almost there...' },
+    { delay: 60000, msg: 'Taking a while...' }
+  ];
+  const timers = statusUpdates.map(u =>
+    setTimeout(() => { if (state === 'sending') setState('sending', u.msg); }, u.delay)
+  );
 
-      if (attempt > 1) {
-        setState('sending', `Retrying... (${attempt}/${maxRetries})`);
-        dbg(`Retry attempt ${attempt}/${maxRetries}`);
-      }
+  try {
+    const formData = new FormData();
+    formData.append('audio', blob, 'voice.webm');
+    formData.append('token', config.token);
+    formData.append('voice', config.voice || 'en-US-AnaNeural');
 
-      const baseUrl = config.url || window.location.origin;
-      dbg(`POST ${baseUrl}/api/voice-send`);
-      setState('sending', 'Uploading audio...');
+    const baseUrl = config.url || window.location.origin;
+    dbg(`POST ${baseUrl}/api/voice-send`);
 
-      // Update status while waiting (server transcribes + polls)
-      const statusUpdates = [
-        { delay: 3000, msg: 'Transcribing...' },
-        { delay: 8000, msg: 'Waiting for Zippy...' },
-        { delay: 20000, msg: 'Still waiting...' },
-        { delay: 45000, msg: 'Zippy is thinking hard...' },
-        { delay: 90000, msg: 'Almost there...' }
-      ];
-      const statusTimers = statusUpdates.map(u =>
-        setTimeout(() => { if (state === 'sending') setState('sending', u.msg); }, u.delay)
-      );
+    const resp = await fetch(`${baseUrl}/api/voice-send`, { method: 'POST', body: formData });
+    timers.forEach(t => clearTimeout(t));
 
-      const resp = await fetch(`${baseUrl}/api/voice-send`, {
-        method: 'POST',
-        body: formData
-      });
+    dbg(`Response: ${resp.status}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
 
-      statusTimers.forEach(t => clearTimeout(t));
-      dbg(`Response status: ${resp.status}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      dbg(`Response keys: ${Object.keys(data).join(', ')}`);
+    if (data.error) { setState('idle', data.error); return; }
 
-      if (data.error) {
-        dbg(`Error from server: ${data.error}`);
-        setState('idle', data.error);
-        return;
-      }
+    // Show transcript
+    transcriptEl.textContent = data.fullReply
+      ? data.fullReply.substring(0, 500) + (data.fullReply.length > 500 ? '...' : '')
+      : data.reply || '';
 
-      // Show transcript
-      dbg(`Transcript: "${data.transcript || '(empty)'}"`);
-      transcriptEl.textContent = data.transcript || '';
-
-      // Play voice response
-      const voiceReply = data.reply || 'No response';
-      const fullReply = data.fullReply || voiceReply;
-      dbg(`Reply (${voiceReply.length} chars): "${voiceReply.substring(0, 80)}..."`);
+    // Play server-generated audio
+    if (data.audioUrl) {
+      dbg(`Playing audio: ${data.audioUrl}`);
+      const audioSrc = (config.url || window.location.origin) + data.audioUrl;
+      audioEl.src = audioSrc;
+      audioEl.load();
       setState('playing');
-      transcriptEl.textContent = fullReply.substring(0, 300) + (fullReply.length > 300 ? '...' : '');
-      await speak(voiceReply);
-      setState('idle');
-      return; // success, done
-    } catch (err) {
-      statusTimers.forEach(t => clearTimeout(t));
-      dbg(`Attempt ${attempt} FAILED: ${err.message}`);
-      console.error(`Attempt ${attempt} failed:`, err);
-      if (attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
-      } else {
-        await speak('Could not reach Zippy after multiple tries.');
-        setState('idle', 'Connection failed — check WiFi/Tailscale');
+      
+      try {
+        await audioEl.play();
+        await new Promise((resolve) => {
+          audioEl.onended = resolve;
+          audioEl.onerror = resolve;
+        });
+      } catch (e) {
+        dbg(`Audio play error: ${e.message}`);
       }
+      setState('idle');
+    } else {
+      dbg('No audio URL — falling back to browser TTS');
+      setState('playing');
+      await browserTTS(data.reply || 'No response');
+      setState('idle');
     }
+  } catch (err) {
+    timers.forEach(t => clearTimeout(t));
+    dbg(`Error: ${err.message}`);
+    setState('idle', 'Connection failed — check settings');
   }
 }
 
-// ─── TTS ───────────────────────────────────────────────────────
-function speak(text) {
+// ─── Fallback browser TTS ──────────────────────────────────────
+function browserTTS(text) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis) { resolve(); return; }
     speechSynthesis.cancel();
-    isSpeaking = true;
-    speakResolve = resolve;
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
-    utterance.rate = 1.0;
-    const voices = speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-      v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural'))
-    ) || voices.find(v => v.lang.startsWith('en'));
-    if (preferred) utterance.voice = preferred;
-    utterance.onend = () => { isSpeaking = false; speakResolve = null; resolve(); };
-    utterance.onerror = () => { isSpeaking = false; speakResolve = null; resolve(); };
+    utterance.onend = resolve;
+    utterance.onerror = resolve;
     speechSynthesis.speak(utterance);
   });
 }
-function stopSpeaking() {
-  if (isSpeaking) {
-    speechSynthesis.cancel();
-    isSpeaking = false;
-    if (speakResolve) { speakResolve(); speakResolve = null; }
-  }
-}
-if (window.speechSynthesis) {
-  speechSynthesis.getVoices();
-  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+
+// ─── Stop audio playback ──────────────────────────────────────
+function stopPlayback() {
+  audioEl.pause();
+  audioEl.currentTime = 0;
+  speechSynthesis?.cancel();
+  setState('idle');
 }
 
 // ─── Main Button ───────────────────────────────────────────────
@@ -354,19 +360,40 @@ micBtn.addEventListener('click', () => {
   } else if (state === 'recording') {
     stopAndSend();
   } else if (state === 'playing') {
-    stopSpeaking();
-    setState('idle');
+    stopPlayback();
   }
 });
 
 // Tap anywhere to stop playback
 document.addEventListener('touchstart', (e) => {
-  if (state === 'playing' && !e.target.closest('#settings-modal') && !e.target.classList.contains('top-btn')) {
+  if (state === 'playing' && !e.target.closest('#settings-modal') && !e.target.classList.contains('top-btn') && e.target.id !== 'new-session-btn') {
     e.preventDefault();
-    stopSpeaking();
-    setState('idle');
+    stopPlayback();
   }
 }, { passive: false });
+
+// ─── New Session ───────────────────────────────────────────────
+document.getElementById('new-session-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('new-session-btn');
+  if (btn.classList.contains('sending')) return;
+  btn.classList.add('sending');
+  btn.textContent = '⏳ Starting...';
+  try {
+    const baseUrl = config.url || window.location.origin;
+    const resp = await fetch(`${baseUrl}/api/new-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: config.token })
+    });
+    if (resp.ok) {
+      btn.textContent = '✅ Fresh start!';
+      transcriptEl.textContent = '';
+    } else throw new Error(`HTTP ${resp.status}`);
+  } catch (e) {
+    btn.textContent = '❌ Failed';
+  }
+  setTimeout(() => { btn.textContent = '✨ New Session'; btn.classList.remove('sending'); }, 2000);
+});
 
 // ─── Hard Reset ────────────────────────────────────────────────
 document.getElementById('reset-btn').addEventListener('click', async () => {
@@ -380,7 +407,6 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
 
 // ─── Service Worker ────────────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state !== 'idle') requestWakeLock();
 });
