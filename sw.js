@@ -1,4 +1,4 @@
-const CACHE_NAME = 'zippy-voice-v5';
+const CACHE_NAME = 'zippy-voice-v6';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();

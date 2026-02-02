@@ -238,6 +238,7 @@ let audioChunks = [];
 let recordingStart = 0;
 let timerInterval = null;
 let wakeLock = null;
+let activePlayer = null; // track the current Audio object so we can stop it
 
 function setState(newState, msg) {
   state = newState;
@@ -372,7 +373,10 @@ async function sendAudio() {
       setState('playing');
 
       // Use a fresh Audio object each time (avoids stale element issues on mobile)
+      // Stop any previous player first
+      if (activePlayer) { try { activePlayer.pause(); activePlayer.src = ''; } catch {} }
       const player = new Audio();
+      activePlayer = player;
       player.preload = 'auto';
       player.volume = 1.0;
 
@@ -448,10 +452,14 @@ function stopPlayback() {
   audioEl.pause();
   audioEl.currentTime = 0;
   audioEl.src = '';
-  // Stop any dynamically created Audio objects
-  document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.src = ''; } catch {} });
+  // Stop the active player (dynamically created Audio object)
+  if (activePlayer) {
+    try { activePlayer.pause(); activePlayer.src = ''; } catch {}
+    activePlayer = null;
+  }
   speechSynthesis?.cancel();
   setState('idle');
+  dbg('Playback stopped by user');
 }
 
 // ─── Main Button ───────────────────────────────────────────────
@@ -463,6 +471,10 @@ micBtn.addEventListener('click', () => {
     stopAndSend();
   } else if (state === 'playing') {
     stopPlayback();
+  } else if (state === 'sending') {
+    // Tap during send = cancel current, go back to idle so you can re-record
+    dbg('Cancelled waiting — tap again to record');
+    stopPlayback(); // resets sendGeneration so the stale response won't play
   }
 });
 
