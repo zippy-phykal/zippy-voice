@@ -1,11 +1,12 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { execFile, exec } = require('child_process');
 
 const PORT = process.env.PORT || 8080;
 const DIR = __dirname;
-const GATEWAY = process.env.GATEWAY_URL || 'http://100.85.34.7:18789';
+const GATEWAY = process.env.GATEWAY_URL || 'http://100.107.89.83:18789';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || '/home/jack/.local/share/whisper/ggml-base.en.bin';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/tmp/zippy-voice';
 const AUDIO_DIR = path.join(UPLOAD_DIR, 'tts');
@@ -50,7 +51,7 @@ function gatewayPost(urlPath, body, token) {
         'Authorization': `Bearer ${token}`,
         'Content-Length': Buffer.byteLength(data)
       },
-      timeout: 180000
+      timeout: 360000
     }, (res) => {
       let chunks = [];
       res.on('data', c => chunks.push(c));
@@ -102,7 +103,6 @@ function cleanForVoice(text) {
 
 // Cloud: Groq Whisper API (fast, reliable)
 async function transcribeGroq(filePath) {
-  const FormData = (await import('node-fetch')).default ? null : null;
   // Use curl for multipart upload (simpler than implementing multipart in node http)
   return new Promise((resolve, reject) => {
     const cmd = `curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" \
@@ -241,7 +241,7 @@ async function sendAndWaitForReply(token, message) {
 
   // Poll for response (up to 2 minutes)
   console.log(`[poll] Waiting for reply (before ts=${before.ts})...`);
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 150; i++) {
     await sleep(2000);
     const after = await getLastAssistantMessage(token);
     if (i % 5 === 0) console.log(`[poll] Check #${i}: ts=${after.ts}`);
@@ -250,7 +250,7 @@ async function sendAndWaitForReply(token, message) {
       return { text: after.text };
     }
   }
-  console.log(`[poll] Timed out after 120s`);
+  console.log(`[poll] Timed out after 300s`);
   return { text: 'Sorry, I didn\'t get a response. Try again.' };
 }
 
@@ -280,7 +280,12 @@ function parseMultipart(buffer, boundary) {
 }
 
 // ─── HTTP Server ───────────────────────────────────────────────
-const server = http.createServer(async (req, res) => {
+// HTTPS with self-signed cert for PWA install + mic access
+const SSL_KEY = path.join(__dirname, 'key.pem');
+const SSL_CERT = path.join(__dirname, 'cert.pem');
+const useHttps = fs.existsSync(SSL_KEY) && fs.existsSync(SSL_CERT);
+
+const serverHandler = async (req, res) => {
 
   // ── Voice send endpoint ──────────────────────────────────────
   if (req.url === '/api/voice-send' && req.method === 'POST') {
@@ -396,11 +401,13 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'Missing token' }));
           return;
         }
-        console.log('[new-session] Sending /new...');
-        await gatewayPost('/tools/invoke', {
-          tool: 'sessions_send',
-          args: { sessionKey: 'agent:main:main', message: '/new' }
+        console.log('[new-session] Sending /new command...');
+        // Send /new as a chat message so OpenClaw processes it as a command
+        await gatewayPost('/v1/chat/completions', {
+          model: 'main',
+          messages: [{ role: 'user', content: '/new' }]
         }, token);
+        console.log('[new-session] Session reset sent');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {
@@ -453,10 +460,18 @@ const server = http.createServer(async (req, res) => {
     });
     res.end(data);
   });
-});
+};
+
+const server = useHttps
+  ? https.createServer({ key: fs.readFileSync(SSL_KEY), cert: fs.readFileSync(SSL_CERT) }, serverHandler)
+  : http.createServer(serverHandler);
+
+// Graceful shutdown to avoid EADDRINUSE on restart
+process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
+process.on('SIGINT', () => { server.close(() => process.exit(0)); });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Zippy Voice v2 serving on http://0.0.0.0:${PORT}`);
+  console.log(`Zippy Voice v2 serving on ${useHttps ? 'https' : 'http'}://0.0.0.0:${PORT}`);
   console.log(`  Groq API: ${GROQ_API_KEY ? 'configured' : 'NOT SET (using local whisper)'}`);
   console.log(`  TTS voice: ${DEFAULT_VOICE}`);
   console.log(`  Gateway: ${GATEWAY}`);

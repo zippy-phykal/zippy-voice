@@ -41,9 +41,9 @@ body {
 }
 #mic-btn svg { width: 72px; height: 72px; fill: #fff; }
 #mic-btn.idle { background: #2563eb; }
-#mic-btn.recording { background: #dc2626; animation: pulse-red 1s infinite; transform: scale(1.05); }
+#mic-btn.recording { background: #16a34a; animation: pulse-green 1s infinite; transform: scale(1.05); }
 #mic-btn.sending { background: #d97706; }
-#mic-btn.playing { background: #16a34a; animation: pulse-green 1.5s infinite; }
+#mic-btn.playing { background: #dc2626; animation: pulse-red 1.5s infinite; }
 @keyframes pulse-red {
   0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.6); }
   70% { box-shadow: 0 0 0 35px rgba(220,38,38,0); }
@@ -173,6 +173,7 @@ const statusEl = document.getElementById('status');
 const timerEl = document.getElementById('timer');
 const transcriptEl = document.getElementById('transcript');
 const audioEl = document.getElementById('tts-audio');
+let sendGeneration = 0; // incremented on each new send to abort stale playback
 
 // ─── Settings ──────────────────────────────────────────────────
 document.getElementById('settings-btn').addEventListener('click', () => {
@@ -265,6 +266,16 @@ async function sendAudio() {
   transcriptEl.textContent = '';
   dbg(`Audio: ${blob.size} bytes`);
 
+  // Track this send — if interrupted, stale sends won't overwrite state
+  const thisGeneration = ++sendGeneration;
+
+  // Unlock audio on user gesture (before async work)
+  audioEl.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwMHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+  audioEl.volume = 1.0;
+  try { await audioEl.play(); } catch(e) { dbg('Audio unlock: ' + e.message); }
+  audioEl.pause();
+  audioEl.currentTime = 0;
+
   // Status updates while waiting
   const statusUpdates = [
     { delay: 2000, msg: 'Transcribing...' },
@@ -286,14 +297,30 @@ async function sendAudio() {
     const baseUrl = config.url || window.location.origin;
     dbg(`POST ${baseUrl}/api/voice-send`);
 
-    const resp = await fetch(`${baseUrl}/api/voice-send`, { method: 'POST', body: formData });
+    let resp, data;
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        resp = await fetch(`${baseUrl}/api/voice-send`, { method: 'POST', body: formData });
+        dbg(`Response: ${resp.status} (attempt ${attempt})`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        data = await resp.json();
+        break; // success
+      } catch (retryErr) {
+        if (attempt === MAX_RETRIES) {
+          timers.forEach(t => clearTimeout(t));
+          throw retryErr;
+        }
+        dbg(`Attempt ${attempt} failed: ${retryErr.message}, retrying in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
     timers.forEach(t => clearTimeout(t));
 
-    dbg(`Response: ${resp.status}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-
     if (data.error) { setState('idle', data.error); return; }
+
+    // Abort if a newer send has started (user interrupted)
+    if (thisGeneration !== sendGeneration) { dbg('Stale send, aborting'); return; }
 
     // Show transcript
     transcriptEl.textContent = data.fullReply
@@ -302,6 +329,7 @@ async function sendAudio() {
 
     // Play server-generated audio
     if (data.audioUrl) {
+      if (thisGeneration !== sendGeneration) { dbg('Stale send, skipping audio'); return; }
       dbg(`Playing audio: ${data.audioUrl}`);
       const audioSrc = (config.url || window.location.origin) + data.audioUrl;
       audioEl.src = audioSrc;
@@ -317,12 +345,14 @@ async function sendAudio() {
       } catch (e) {
         dbg(`Audio play error: ${e.message}`);
       }
-      setState('idle');
+      // Only set idle if this is still the active generation
+      if (thisGeneration === sendGeneration) setState('idle');
     } else {
+      if (thisGeneration !== sendGeneration) return;
       dbg('No audio URL — falling back to browser TTS');
       setState('playing');
       await browserTTS(data.reply || 'No response');
-      setState('idle');
+      if (thisGeneration === sendGeneration) setState('idle');
     }
   } catch (err) {
     timers.forEach(t => clearTimeout(t));
@@ -346,8 +376,10 @@ function browserTTS(text) {
 
 // ─── Stop audio playback ──────────────────────────────────────
 function stopPlayback() {
+  sendGeneration++; // invalidate any in-flight send
   audioEl.pause();
   audioEl.currentTime = 0;
+  audioEl.src = ''; // clear source to prevent replay
   speechSynthesis?.cancel();
   setState('idle');
 }

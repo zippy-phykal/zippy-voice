@@ -1,4 +1,4 @@
-const CACHE_NAME = 'zippy-voice-v2';
+const CACHE_NAME = 'zippy-voice-v3';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -13,8 +13,8 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Never intercept API calls
-  if (e.request.url.includes('/v1/')) return;
+  // Never intercept API calls or audio
+  if (e.request.url.includes('/v1/') || e.request.url.includes('/api/') || e.request.url.includes('/audio/')) return;
 
   e.respondWith(
     fetch(e.request).catch(() =>
