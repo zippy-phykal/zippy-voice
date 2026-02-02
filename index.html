@@ -63,6 +63,33 @@ body {
 #timer { margin-top: 8px; font-size: 24px; color: #dc2626; font-variant-numeric: tabular-nums; min-height: 30px; }
 /* Audio element hidden */
 #tts-audio { display: none; }
+/* Install banner */
+#install-banner {
+  display: none; position: fixed; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(135deg, #2563eb, #7c3aed); padding: 16px 20px;
+  z-index: 150; align-items: center; gap: 12px;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+  animation: slideUp 0.3s ease-out;
+}
+#install-banner.show { display: flex; }
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+#install-banner .install-icon { font-size: 32px; flex-shrink: 0; }
+#install-banner .install-text { flex: 1; }
+#install-banner .install-text strong { display: block; color: #fff; font-size: 15px; }
+#install-banner .install-text span { color: rgba(255,255,255,0.8); font-size: 13px; }
+#install-banner .install-btn {
+  background: #fff; color: #2563eb; border: none; border-radius: 20px;
+  padding: 10px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
+  flex-shrink: 0; transition: transform 0.1s;
+}
+#install-banner .install-btn:active { transform: scale(0.95); }
+#install-banner .install-close {
+  background: none; border: none; color: rgba(255,255,255,0.6);
+  font-size: 20px; cursor: pointer; padding: 4px; flex-shrink: 0;
+}
 /* Debug panel */
 #debug {
   position: fixed; bottom: 0; left: 0; right: 0;
@@ -113,6 +140,16 @@ body {
 <div id="transcript"></div>
 
 <audio id="tts-audio" preload="none"></audio>
+
+<div id="install-banner">
+  <div class="install-icon">⚡</div>
+  <div class="install-text">
+    <strong>Install Zippy Voice</strong>
+    <span>Add to your home screen for the best experience</span>
+  </div>
+  <button class="install-btn" id="install-btn">Install</button>
+  <button class="install-close" id="install-close">✕</button>
+</div>
 
 <div id="debug"></div>
 <button id="debug-toggle">🐛</button>
@@ -435,6 +472,42 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   const keys = await caches?.keys() || [];
   for (const k of keys) await caches.delete(k);
   window.location.reload(true);
+});
+
+// ─── PWA Install Prompt ────────────────────────────────────────
+let deferredPrompt = null;
+const installBanner = document.getElementById('install-banner');
+const installBtn = document.getElementById('install-btn');
+const installClose = document.getElementById('install-close');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Show banner if not previously dismissed
+  if (!localStorage.getItem('zv_install_dismissed')) {
+    installBanner.classList.add('show');
+  }
+  dbg('Install prompt ready');
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  installBanner.classList.remove('show');
+  deferredPrompt.prompt();
+  const result = await deferredPrompt.userChoice;
+  dbg(`Install: ${result.outcome}`);
+  deferredPrompt = null;
+});
+
+installClose.addEventListener('click', () => {
+  installBanner.classList.remove('show');
+  localStorage.setItem('zv_install_dismissed', '1');
+});
+
+window.addEventListener('appinstalled', () => {
+  installBanner.classList.remove('show');
+  deferredPrompt = null;
+  dbg('App installed!');
 });
 
 // ─── Service Worker ────────────────────────────────────────────
