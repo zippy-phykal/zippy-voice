@@ -246,7 +246,7 @@ function setState(newState, msg) {
   statusEl.textContent = msg || {
     idle: 'Tap to talk',
     recording: 'Recording — tap to send',
-    sending: 'Sending to Zippy...',
+    sending: 'Sending — tap to cancel',
     playing: 'Playing — tap to stop'
   }[newState];
   if (newState !== 'recording') {
@@ -316,11 +316,11 @@ async function sendAudio() {
 
   // Status updates while waiting
   const statusUpdates = [
-    { delay: 2000, msg: 'Transcribing...' },
-    { delay: 6000, msg: 'Waiting for Zippy...' },
-    { delay: 15000, msg: 'Still thinking...' },
-    { delay: 30000, msg: 'Almost there...' },
-    { delay: 60000, msg: 'Taking a while...' }
+    { delay: 2000, msg: 'Transcribing — tap to cancel' },
+    { delay: 6000, msg: 'Waiting for Zippy — tap to cancel' },
+    { delay: 15000, msg: 'Still thinking — tap to cancel' },
+    { delay: 30000, msg: 'Almost there — tap to cancel' },
+    { delay: 60000, msg: 'Taking a while — tap to cancel' }
   ];
   const timers = statusUpdates.map(u =>
     setTimeout(() => { if (state === 'sending') setState('sending', u.msg); }, u.delay)
@@ -475,6 +475,7 @@ micBtn.addEventListener('click', () => {
     // Tap during send = cancel current, go back to idle so you can re-record
     dbg('Cancelled waiting — tap again to record');
     stopPlayback(); // resets sendGeneration so the stale response won't play
+    setState('idle', 'Cancelled — tap to talk');
   }
 });
 
