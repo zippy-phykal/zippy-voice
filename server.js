@@ -436,6 +436,75 @@ const serverHandler = async (req, res) => {
     return;
   }
 
+  // ── TTS-only endpoint (for SSE push messages) ────────────────
+  if (req.url === '/api/tts' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { text, voice } = JSON.parse(body);
+        if (!text) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Missing text' })); return; }
+        const voiceText = cleanForVoice(text);
+        if (!voiceText) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ audioUrl: null })); return; }
+        const tts = await generateTTS(voiceText, voice);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ audioUrl: tts.url, text: voiceText }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ── SSE stream for push responses ────────────────────────────
+  if (req.url.startsWith('/api/stream') && req.method === 'GET') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const token = url.searchParams.get('token');
+    if (!token) { res.writeHead(401); res.end('Missing token'); return; }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.write(':\n\n'); // SSE comment to establish connection
+
+    let lastSeenTs = Date.now();
+    let closed = false;
+
+    const heartbeat = setInterval(() => {
+      if (!closed) res.write(':\n\n'); // keep-alive
+    }, 15000);
+
+    const poller = setInterval(async () => {
+      if (closed) return;
+      try {
+        const msg = await getLastAssistantMessage(token);
+        if (msg.ts > lastSeenTs && msg.text) {
+          // Skip messages that look like voice echo or system
+          if (/^🎙️/.test(msg.text) || /^⚡\s/.test(msg.text)) return;
+          if (msg.text === 'NO_REPLY' || msg.text === 'HEARTBEAT_OK' || msg.text === 'ANNOUNCE_SKIP') return;
+          lastSeenTs = msg.ts;
+          const data = JSON.stringify({ text: msg.text, ts: msg.ts });
+          res.write(`data: ${data}\n\n`);
+          console.log(`[sse] Pushed message (${msg.text.length} chars)`);
+        }
+      } catch (e) {
+        console.log(`[sse] Poll error: ${e.message}`);
+      }
+    }, 3000);
+
+    req.on('close', () => {
+      closed = true;
+      clearInterval(heartbeat);
+      clearInterval(poller);
+      console.log('[sse] Client disconnected');
+    });
+    return;
+  }
+
   // ── Serve TTS audio files ────────────────────────────────────
   if (req.url.startsWith('/audio/') && req.method === 'GET') {
     const filename = path.basename(req.url);

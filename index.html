@@ -229,6 +229,7 @@ document.getElementById('save-btn').addEventListener('click', () => {
   saveConfig(config);
   document.getElementById('settings-modal').classList.remove('open');
   dbg(`Config saved. Voice: ${config.voice}`);
+  startSSE(); // reconnect SSE with new config
 });
 
 // ─── State ─────────────────────────────────────────────────────
@@ -343,6 +344,7 @@ async function sendAudio() {
         dbg(`Response: ${resp.status} (attempt ${attempt})`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         data = await resp.json();
+        lastDirectReplyTs = Date.now(); // prevent SSE from re-playing this
         break; // success
       } catch (retryErr) {
         if (attempt === MAX_RETRIES) {
@@ -555,6 +557,84 @@ window.addEventListener('appinstalled', () => {
   deferredPrompt = null;
   dbg('App installed!');
 });
+
+// ─── SSE: Listen for push responses ────────────────────────────
+let sseSource = null;
+let lastDirectReplyTs = 0; // track timestamp of last direct voice reply
+
+function startSSE() {
+  if (!config.token) return;
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  const baseUrl = config.url || window.location.origin;
+  sseSource = new EventSource(`${baseUrl}/api/stream?token=${encodeURIComponent(config.token)}`);
+  
+  sseSource.onmessage = async (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      // Skip if this was already played as a direct voice reply (within 10s window)
+      if (data.ts && data.ts <= lastDirectReplyTs + 10000) return;
+      // Skip if we're currently recording, sending, or playing
+      if (state !== 'idle') { dbg('SSE: skipped (busy)'); return; }
+      
+      dbg('SSE: incoming follow-up');
+      const baseUrl = config.url || window.location.origin;
+      
+      // Request TTS for the pushed message
+      const ttsResp = await fetch(`${baseUrl}/api/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: data.text, voice: config.voice })
+      });
+      const ttsData = await ttsResp.json();
+      
+      if (ttsData.audioUrl) {
+        setState('playing', 'Follow-up — tap to stop');
+        const player = new Audio(baseUrl + ttsData.audioUrl);
+        activePlayer = player;
+        player.preload = 'auto';
+        player.volume = 1.0;
+        
+        await new Promise((resolve) => {
+          let started = false;
+          const timeout = setTimeout(() => { if (!started) resolve(); }, 8000);
+          player.oncanplaythrough = async () => {
+            if (started) return;
+            started = true;
+            clearTimeout(timeout);
+            try {
+              await player.play();
+              player.onended = () => resolve();
+              player.onerror = () => resolve();
+            } catch { resolve(); }
+          };
+          player.onerror = () => { clearTimeout(timeout); resolve(); };
+          player.src = baseUrl + ttsData.audioUrl;
+          player.load();
+        });
+        
+        player.src = '';
+        activePlayer = null;
+        if (state === 'playing') setState('idle');
+      } else if (ttsData.text) {
+        setState('playing', 'Follow-up — tap to stop');
+        await browserTTS(ttsData.text);
+        if (state === 'playing') setState('idle');
+      }
+    } catch (e) {
+      dbg(`SSE play error: ${e.message}`);
+    }
+  };
+  
+  sseSource.onerror = () => {
+    dbg('SSE: reconnecting...');
+    // EventSource auto-reconnects
+  };
+  
+  dbg('SSE: connected');
+}
+
+// Start SSE when config is loaded
+if (config.token) startSSE();
 
 // ─── Service Worker ────────────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
