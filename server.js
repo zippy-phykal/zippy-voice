@@ -366,11 +366,13 @@ const serverHandler = async (req, res) => {
           console.log(`[voice] TTS failed: ${e.message}`);
         }
 
-        // Send AI reply to Telegram
-        gatewayPost('/tools/invoke', {
-          tool: 'message',
-          args: { action: 'send', channel: 'telegram', target: TELEGRAM_CHAT_ID, message: `⚡ ${result.text}` }
-        }, token).catch(() => {});
+        // Send AI reply to Telegram (skip error/timeout messages)
+        if (result.text && !result.text.startsWith('Sorry, I didn\'t get a response')) {
+          gatewayPost('/tools/invoke', {
+            tool: 'message',
+            args: { action: 'send', channel: 'telegram', target: TELEGRAM_CHAT_ID, message: `⚡ ${result.text}` }
+          }, token).catch(() => {});
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
