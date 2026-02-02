@@ -367,22 +367,53 @@ async function sendAudio() {
     // Play server-generated audio
     if (data.audioUrl) {
       if (thisGeneration !== sendGeneration) { dbg('Stale send, skipping audio'); return; }
-      dbg(`Playing audio: ${data.audioUrl}`);
       const audioSrc = (config.url || window.location.origin) + data.audioUrl;
-      audioEl.src = audioSrc;
-      audioEl.load();
+      dbg(`Playing audio: ${audioSrc}`);
       setState('playing');
-      
-      try {
-        await audioEl.play();
-        await new Promise((resolve) => {
-          audioEl.onended = resolve;
-          audioEl.onerror = resolve;
-        });
-      } catch (e) {
-        dbg(`Audio play error: ${e.message}`);
+
+      // Use a fresh Audio object each time (avoids stale element issues on mobile)
+      const player = new Audio();
+      player.preload = 'auto';
+      player.volume = 1.0;
+
+      const played = await new Promise((resolve) => {
+        let started = false;
+        const timeout = setTimeout(() => {
+          if (!started) { dbg('Audio load timeout — falling back to browser TTS'); resolve(false); }
+        }, 8000);
+
+        player.oncanplaythrough = async () => {
+          if (started) return;
+          started = true;
+          clearTimeout(timeout);
+          try {
+            await player.play();
+            dbg('Audio playing');
+            player.onended = () => resolve(true);
+            player.onerror = () => resolve(true);
+          } catch (e) {
+            dbg(`Audio play blocked: ${e.message}`);
+            resolve(false);
+          }
+        };
+        player.onerror = () => {
+          if (!started) { clearTimeout(timeout); dbg('Audio load error'); resolve(false); }
+        };
+        player.src = audioSrc;
+        player.load();
+      });
+
+      // If server audio failed, fall back to browser TTS
+      if (!played && thisGeneration === sendGeneration) {
+        dbg('Falling back to browser TTS');
+        await browserTTS(data.reply || 'No response');
       }
-      // Only set idle if this is still the active generation
+
+      // Cleanup
+      if (!player.paused) {
+        await new Promise(r => { player.onended = r; player.onerror = r; });
+      }
+      player.src = '';
       if (thisGeneration === sendGeneration) setState('idle');
     } else {
       if (thisGeneration !== sendGeneration) return;
@@ -416,7 +447,9 @@ function stopPlayback() {
   sendGeneration++; // invalidate any in-flight send
   audioEl.pause();
   audioEl.currentTime = 0;
-  audioEl.src = ''; // clear source to prevent replay
+  audioEl.src = '';
+  // Stop any dynamically created Audio objects
+  document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.src = ''; } catch {} });
   speechSynthesis?.cancel();
   setState('idle');
 }

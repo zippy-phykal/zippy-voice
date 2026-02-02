@@ -440,10 +440,16 @@ const serverHandler = async (req, res) => {
   if (req.url.startsWith('/audio/') && req.method === 'GET') {
     const filename = path.basename(req.url);
     const filepath = path.join(AUDIO_DIR, filename);
-    fs.readFile(filepath, (err, data) => {
+    fs.stat(filepath, (err, stat) => {
       if (err) { res.writeHead(404); res.end('Not found'); return; }
-      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-cache' });
-      res.end(data);
+      res.writeHead(200, {
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': stat.size,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache',
+        'Access-Control-Allow-Origin': '*'
+      });
+      fs.createReadStream(filepath).pipe(res);
     });
     return;
   }
